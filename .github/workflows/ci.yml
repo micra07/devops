@@ -34,7 +34,7 @@ jobs:
         python3 -c "
         try:
             from tests.test_api import *
-            print('✓ API tests can be imported ')
+            print('✓ API tests can be imported')
         except Exception as e:
             print(f'✗ API tests import failed: {e}')
         "
