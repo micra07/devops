@@ -2,10 +2,11 @@ name: CD Deploy
 
 on:
   workflow_run:
-    branches: [ master, github-actions ]
     workflows: ["CI"]  # Название вашего CI workflow
     types:
       - completed
+    branches:
+      - github-actions
 
 jobs:
   deploy:
