@@ -73,7 +73,7 @@ jobs:
               log "Git repository not found, cloning..."
               log "Cloning from: $REPO_URL"
               
-              git clone "$REPO_URL" . >> "$LOG_FILE" 2>&1
+              git clone -b github-actions "$REPO_URL" . >> "$LOG_FILE" 2>&1
               if [ $? -ne 0 ]; then
                   log "ERROR: Git clone failed"
                   exit 1
@@ -192,4 +192,12 @@ jobs:
           # Проверяем что процесс запустился
           sleep 3
           if ps -p $APP_PID > /dev/null 2>&1; then
-              log "Application star
+              log "Application started successfully (PID: $APP_PID)"
+          else
+              log "WARNING: Application may not have started properly"
+              log "App.log contents:"
+              tail -20 /home/ubuntu/app.log >> "$LOG_FILE" 2>&1
+          fi
+
+          log "=== Deployment completed ==="
+          echo "success"
