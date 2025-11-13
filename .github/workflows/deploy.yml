@@ -3,31 +3,12 @@ name: CD Deploy
 on:
   release:
     types: [published]
-    
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        
-    - name: Build application 
-      run: |
-        echo "Building application..."
-        # Добавьте команды сборки если нужны
-        
     - name: Deploy to VM
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -37,7 +18,7 @@ jobs:
         port: 2431
         script: |
           # Конфигурация
-          REPO_URL="https://github.com/moter1026/devops"
+          REPO_URL="https://github.com/moter1026/devops.git"
           DEPLOY_DIR="/home/ubuntu/app"
           LOG_FILE="/home/ubuntu/deploy.log"
 
@@ -46,146 +27,95 @@ jobs:
               echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
           }
 
-          # Начало деплоя
+          log "=== Starting deployment ==="
+
+          # 1. Очистка директории БЕЗ sudo
           log "Cleaning deployment directory..."
-          sudo rm -rf "$DEPLOY_DIR"
+          cd /home/ubuntu
+          rm -rf "$DEPLOY_DIR"
           mkdir -p "$DEPLOY_DIR"
           cd "$DEPLOY_DIR"
 
-          log "Current directory after cd: $(pwd)"
-          log "Directory contents:"
+          log "Directory contents after clean:"
           ls -la
 
-          # 2. Клонирование или обновление кода
-          if [ ! -d ".git" ]; then
-              log "Git repository not found, cloning..."
-              log "Cloning from: $REPO_URL"
-              
-              git clone -b github-actions "$REPO_URL" . >> "$LOG_FILE" 2>&1
-              if [ $? -ne 0 ]; then
-                  log "ERROR: Git clone failed"
-                  exit 1
-              fi
-              log "Repository cloned successfully"
-              mkdir -p $DEPLOY_DIR/logs
-              # Проверяем что клонировалось
-              log "After clone - directory contents:"
-              ls -la
-          else
-              log "Git repository found, updating..."
-              log "Current git status:"
-              git status >> "$LOG_FILE" 2>&1
-              git remote -v >> "$LOG_FILE" 2>&1
-              
-              git pull >> "$LOG_FILE" 2>&1
-              if [ $? -ne 0 ]; then
-                  log "ERROR: Git pull failed"
-                  # Пробуем fetch и reset
-                  git fetch origin >> "$LOG_FILE" 2>&1
-                  git reset --hard origin/main >> "$LOG_FILE" 2>&1
-                  if [ $? -ne 0 ]; then
-                      log "ERROR: Git fetch/reset also failed"
-                      exit 1
-                  fi
-              fi
-              log "Repository updated successfully"
+          # 2. Клонирование репозитория
+          log "Cloning repository..."
+          git clone -b github-actions "$REPO_URL" . >> "$LOG_FILE" 2>&1
+          if [ $? -ne 0 ]; then
+              log "ERROR: Git clone failed"
+              exit 1
           fi
 
-          # Показываем последний коммит
-          log "Latest commit:"
-          git log -1 --oneline >> "$LOG_FILE" 2>&1
+          log "Repository cloned successfully"
+          log "Files in app directory:"
+          find . -type f -name "*.py" -o -name "*.txt" -o -name "*.json" | head -10
 
-          # 3. Сборка приложения (если требуется)
-          if [ -f "package.json" ]; then
-              log "Found package.json, installing Node.js dependencies..."
-              npm install >> "$LOG_FILE" 2>&1
-              if [ $? -eq 0 ]; then
-                  log "Node.js dependencies installed successfully"
-              else
-                  log "WARNING: npm install failed"
-              fi
-          else
-              log "No package.json found"
-          fi
+          # 3. Проверяем и устанавливаем системные пакеты БЕЗ sudo
+          log "Checking Python environment..."
+          python3 --version
+          pip3 --version || log "pip3 not available"
 
-
+          # 4. Установка Python зависимостей БЕЗ venv (просто через pip3)
           if [ -f "requirements.txt" ]; then
-              log "Found requirements.txt, installing Python dependencies..."
-              python3 -m venv myenv
-              source myenv/bin/activate
-              pip3 install -r requirements.txt >> "$LOG_FILE" 2>&1
+              log "Installing Python dependencies..."
+              pip3 install --user -r requirements.txt >> "$LOG_FILE" 2>&1
               if [ $? -eq 0 ]; then
                   log "Python dependencies installed successfully"
               else
-                  log "WARNING: pip install failed"
+                  log "Trying alternative installation..."
+                  # Пробуем установить без --user
+                  pip3 install -r requirements.txt >> "$LOG_FILE" 2>&1 || \
+                  log "WARNING: Some dependencies failed to install"
               fi
           else
               log "No requirements.txt found"
           fi
 
-
-          # 4. Запуск тестов (если есть) - ИСПРАВЛЕНА ОШИБКА
-          if [ -f "package.json" ]; then
-              log "Checking for tests in package.json..."
-              if grep -q "\"test\"" package.json; then
-                  log "Running tests..."
-                  npm test >> "$LOG_FILE" 2>&1
-                  if [ $? -eq 0 ]; then
-                      log "Tests passed"
-                  else
-                      log "WARNING: Tests failed, but continuing deployment"
-                  fi
-              else
-                  log "No test script found in package.json"
-              fi
-          fi
-
-          # 5. Развертывание и перезапуск
+          # 5. Запуск приложения
           log "Restarting application..."
-
-          # Останавливаем старые процессы
-          log "Stopping existing application processes..."
-          pkill -f "python.*app.py" || log "No Python app processes found"
-          pkill -f "python.*main.py" || log "No Python main processes found"
-          pkill -f "python.*test_app.py" || log "No test app processes found"
-          pkill -f "node.*index.js" || log "No Node.js processes found"
-
+          
+          # Останавливаем старые процессы БЕЗ sudo
+          pkill -f "python.*app.py" || log "No existing app processes"
+          pkill -f "python.*8181" || log "No python processes on 8181"
           sleep 2
 
-          # Запускаем приложение в зависимости от типа
-          log "Looking for application files..."
+          # Запускаем приложение
           if [ -f "app.py" ]; then
-              log "Starting Python app.py..."
+              log "Starting app.py..."
+              # Добавляем путь к пользовательским пакетам
+              export PYTHONPATH="/home/ubuntu/.local/lib/python3.*/site-packages:$PYTHONPATH"
               nohup python3 app.py >> /home/ubuntu/app.log 2>&1 &
               APP_PID=$!
-              log "App started with PID: $APP_PID"
-          elif [ -f "index.js" ]; then
-              log "Starting Node.js index.js..."
-              nohup node index.js >> /home/ubuntu/app.log 2>&1 &
-              APP_PID=$!
-              log "App started with PID: $APP_PID"
-          elif [ -f "main.py" ]; then
-              log "Starting main.py..."
-              nohup python3 main.py >> /home/ubuntu/app.log 2>&1 &
-              APP_PID=$!
-              log "App started with PID: $APP_PID"
+              sleep 5
+              
+              if ps -p $APP_PID > /dev/null 2>&1; then
+                  log "Application started successfully (PID: $APP_PID)"
+              else
+                  log "ERROR: Application failed to start"
+                  log "App log contents:"
+                  tail -20 /home/ubuntu/app.log
+                  exit 1
+              fi
           else
-              # Запускаем тестовое приложение по умолчанию
-              log "No application files found, starting default test app..."
-              nohup python3 /home/ubuntu/test_app.py >> /home/ubuntu/app.log 2>&1 &
-              APP_PID=$!
-              log "Test app started with PID: $APP_PID"
+              log "ERROR: app.py not found"
+              log "Available files:"
+              ls -la
+              exit 1
           fi
 
-          # Проверяем что процесс запустился
+          # 6. Проверка порта
+          log "Checking port 8181..."
           sleep 3
-          if ps -p $APP_PID > /dev/null 2>&1; then
-              log "Application started successfully (PID: $APP_PID)"
+          if netstat -tln 2>/dev/null | grep :8181 > /dev/null || \
+             ss -tln 2>/dev/null | grep :8181 > /dev/null; then
+              log "✅ Application is listening on port 8181"
+              log "✅ Deployment completed successfully"
           else
-              log "WARNING: Application may not have started properly"
-              log "App.log contents:"
-              tail -20 /home/ubuntu/app.log >> "$LOG_FILE" 2>&1
+              log "❌ Application NOT listening on port 8181"
+              log "Process check:"
+              ps aux | grep python
+              log "App log (last 30 lines):"
+              tail -30 /home/ubuntu/app.log
+              exit 1
           fi
-
-          log "=== Deployment completed ==="
-          echo "success"
