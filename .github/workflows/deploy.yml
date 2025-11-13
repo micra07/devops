@@ -47,22 +47,10 @@ jobs:
           }
 
           # Начало деплоя
-          log "=== Starting deployment ==="
-          log "Working directory: $(pwd)"
-          log "Deploy directory: $DEPLOY_DIR"
-
-          # 1. Создаем директорию если не существует
-          if [ ! -d "$DEPLOY_DIR" ]; then
-              log "Creating deploy directory..."
-              mkdir -p $DEPLOY_DIR
-          else
-              log "Deploy directory already exists"
-          fi
-
-          cd "$DEPLOY_DIR" || {
-              log "ERROR: Cannot cd to $DEPLOY_DIR"
-              exit 1
-          }
+          log "Cleaning deployment directory..."
+          sudo rm -rf "$DEPLOY_DIR"
+          mkdir -p "$DEPLOY_DIR"
+          cd "$DEPLOY_DIR"
 
           log "Current directory after cd: $(pwd)"
           log "Directory contents:"
