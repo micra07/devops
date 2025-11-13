@@ -65,11 +65,7 @@ jobs:
               pip install -r requirements.txt
           fi
 
-          # 4. Остановка старого процесса (если есть)
-          log "Stopping existing app..."
-          pkill -f "python.*app.py" 2>/dev/null || true
-
-          # 5. Запуск приложения в новом процессе
+          # 4. Запуск приложения в новом процессе
           log "Restarting application via daemon..."
           # Останавливаем и запускаем приложение через демон
           systemctl restart devops_app_lab1
@@ -83,7 +79,7 @@ jobs:
               exit 1
           fi
 
-          # 6. Проверка порта
+          # 5. Проверка порта
           log "Checking if port 8181 is open..."
           if netstat -tln 2>/dev/null | grep :8181 > /dev/null || ss -tln 2>/dev/null | grep :8181 > /dev/null; then
               log "✅ Application is listening on port 8181"
