@@ -75,18 +75,15 @@ jobs:
           python3 --version
           pip3 --version || log "pip3 not available"
 
-          # 4. Установка Python зависимостей БЕЗ venv (просто через pip3)
+          # 4. Установка Python зависимостей
           if [ -f "requirements.txt" ]; then
-              log "Installing Python dependencies..."
-              pip3 install --user -r requirements.txt >> "$LOG_FILE" 2>&1
-              if [ $? -eq 0 ]; then
-                  log "Python dependencies installed successfully"
-              else
-                  log "Trying alternative installation..."
-                  # Пробуем установить без --user
-                  pip3 install -r requirements.txt >> "$LOG_FILE" 2>&1 || \
-                  log "WARNING: Some dependencies failed to install"
-              fi
+              echo "Setting up virtual environment..."
+              python3 -m venv venv
+              source venv/bin/activate
+
+              echo "Installing dependencies..."
+              pip install --upgrade pip
+              pip install -r requirements.txt
           else
               log "No requirements.txt found"
           fi
