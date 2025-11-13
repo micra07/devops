@@ -98,21 +98,8 @@ jobs:
 
           # Запускаем приложение
           if [ -f "app.py" ]; then
-              log "Starting app.py..."
-              # Добавляем путь к пользовательским пакетам
-              export PYTHONPATH="/home/ubuntu/.local/lib/python3.*/site-packages:$PYTHONPATH"
-              nohup python3 app.py >> /home/ubuntu/app.log 2>&1 &
-              APP_PID=$!
-              sleep 5
-              
-              if ps -p $APP_PID > /dev/null 2>&1; then
-                  log "Application started successfully (PID: $APP_PID)"
-              else
-                  log "ERROR: Application failed to start"
-                  log "App log contents:"
-                  tail -20 /home/ubuntu/app.log
-                  exit 1
-              fi
+              sudo systemctl restart app
+              log "Application started"
           else
               log "ERROR: app.py not found"
               log "Available files:"
