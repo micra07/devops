@@ -3,12 +3,31 @@ name: CD Deploy
 on:
   release:
     types: [published]
+    
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Build application 
+      run: |
+        echo "Building application..."
+        # Добавьте команды сборки если нужны
+        
     - name: Deploy to VM
       uses: appleboy/ssh-action@v1.0.0
       with:
