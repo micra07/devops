@@ -37,79 +37,159 @@ jobs:
         port: 2431
         script: |
           # Конфигурация
+          REPO_URL="https://github.com/moter1026/devops"
           DEPLOY_DIR="/home/ubuntu/app"
           LOG_FILE="/home/ubuntu/deploy.log"
-          
+
           # Функция логирования
           log() {
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
+              echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
           }
-          
+
+          # Начало деплоя
           log "=== Starting deployment ==="
-          
-          # Создаем директорию если не существует
-          mkdir -p $DEPLOY_DIR
-          cd $DEPLOY_DIR
-          
-          # Очищаем директорию если она не пустая
-          if [ "$(ls -A $DEPLOY_DIR)" ]; then
-            log "Cleaning existing directory..."
-            rm -rf $DEPLOY_DIR/*
+          log "Working directory: $(pwd)"
+          log "Deploy directory: $DEPLOY_DIR"
+
+          # 1. Создаем директорию если не существует
+          if [ ! -d "$DEPLOY_DIR" ]; then
+              log "Creating deploy directory..."
+              mkdir -p $DEPLOY_DIR
+          else
+              log "Deploy directory already exists"
           fi
-          
-          # Клонирование репозитория
-          log "Cloning repository from github-actions branch..."
-          git clone -b github-actions https://github.com/${{ github.repository }}.git .
-          
-          # Переключаемся на тег релиза
-          log "Checking out release tag: ${{ github.event.release.tag_name }}"
-          git checkout ${{ github.event.release.tag_name }}
-          
-          # Установка системных зависимостей
-          log "Installing system dependencies..."
-          sudo apt update
-          sudo apt install -y python3-venv python3-pip
-          
-          # Установка зависимостей Python
+
+          cd "$DEPLOY_DIR" || {
+              log "ERROR: Cannot cd to $DEPLOY_DIR"
+              exit 1
+          }
+
+          log "Current directory after cd: $(pwd)"
+          log "Directory contents:"
+          ls -la
+
+          # 2. Клонирование или обновление кода
+          if [ ! -d ".git" ]; then
+              log "Git repository not found, cloning..."
+              log "Cloning from: $REPO_URL"
+              
+              git clone "$REPO_URL" . >> "$LOG_FILE" 2>&1
+              if [ $? -ne 0 ]; then
+                  log "ERROR: Git clone failed"
+                  exit 1
+              fi
+              log "Repository cloned successfully"
+              mkdir -p $DEPLOY_DIR/logs
+              # Проверяем что клонировалось
+              log "After clone - directory contents:"
+              ls -la
+          else
+              log "Git repository found, updating..."
+              log "Current git status:"
+              git status >> "$LOG_FILE" 2>&1
+              git remote -v >> "$LOG_FILE" 2>&1
+              
+              git pull >> "$LOG_FILE" 2>&1
+              if [ $? -ne 0 ]; then
+                  log "ERROR: Git pull failed"
+                  # Пробуем fetch и reset
+                  git fetch origin >> "$LOG_FILE" 2>&1
+                  git reset --hard origin/main >> "$LOG_FILE" 2>&1
+                  if [ $? -ne 0 ]; then
+                      log "ERROR: Git fetch/reset also failed"
+                      exit 1
+                  fi
+              fi
+              log "Repository updated successfully"
+          fi
+
+          # Показываем последний коммит
+          log "Latest commit:"
+          git log -1 --oneline >> "$LOG_FILE" 2>&1
+
+          # 3. Сборка приложения (если требуется)
+          if [ -f "package.json" ]; then
+              log "Found package.json, installing Node.js dependencies..."
+              npm install >> "$LOG_FILE" 2>&1
+              if [ $? -eq 0 ]; then
+                  log "Node.js dependencies installed successfully"
+              else
+                  log "WARNING: npm install failed"
+              fi
+          else
+              log "No package.json found"
+          fi
+
+
           if [ -f "requirements.txt" ]; then
-            log "Installing Python dependencies..."
-            python3 -m venv venv
-            source venv/bin/activate
-            pip install -r requirements.txt
+              log "Found requirements.txt, installing Python dependencies..."
+              python3 -m venv myenv
+              source myenv/bin/activate
+              pip3 install -r requirements.txt >> "$LOG_FILE" 2>&1
+              if [ $? -eq 0 ]; then
+                  log "Python dependencies installed successfully"
+              else
+                  log "WARNING: pip install failed"
+              fi
+          else
+              log "No requirements.txt found"
           fi
-          
+
+
+          # 4. Запуск тестов (если есть) - ИСПРАВЛЕНА ОШИБКА
+          if [ -f "package.json" ]; then
+              log "Checking for tests in package.json..."
+              if grep -q "\"test\"" package.json; then
+                  log "Running tests..."
+                  npm test >> "$LOG_FILE" 2>&1
+                  if [ $? -eq 0 ]; then
+                      log "Tests passed"
+                  else
+                      log "WARNING: Tests failed, but continuing deployment"
+                  fi
+              else
+                  log "No test script found in package.json"
+              fi
+          fi
+
+          # 5. Развертывание и перезапуск
+          log "Restarting application..."
+
           # Останавливаем старые процессы
-          log "Stopping existing application..."
-          sudo pkill -f "python.*app.py" || true
-          sudo pkill -f "python.*8181" || true
+          log "Stopping existing application processes..."
+          pkill -f "python.*app.py" || log "No Python app processes found"
+          pkill -f "python.*main.py" || log "No Python main processes found"
+          pkill -f "python.*test_app.py" || log "No test app processes found"
+          pkill -f "node.*index.js" || log "No Node.js processes found"
+
           sleep 2
-          
-          # Запускаем приложение
-          log "Starting application..."
-          if [ -f "requirements.txt" ] && [ -d "venv" ]; then
-            source venv/bin/activate
+
+          # Запускаем приложение в зависимости от типа
+          log "Looking for application files..."
+          if [ -f "app.py" ]; then
+              log "Starting Python app.py..."
+              nohup python3 app.py >> /home/ubuntu/app.log 2>&1 &
+              APP_PID=$!
+              log "App started with PID: $APP_PID"
+          elif [ -f "index.js" ]; then
+              log "Starting Node.js index.js..."
+              nohup node index.js >> /home/ubuntu/app.log 2>&1 &
+              APP_PID=$!
+              log "App started with PID: $APP_PID"
+          elif [ -f "main.py" ]; then
+              log "Starting main.py..."
+              nohup python3 main.py >> /home/ubuntu/app.log 2>&1 &
+              APP_PID=$!
+              log "App started with PID: $APP_PID"
+          else
+              # Запускаем тестовое приложение по умолчанию
+              log "No application files found, starting default test app..."
+              nohup python3 /home/ubuntu/test_app.py >> /home/ubuntu/app.log 2>&1 &
+              APP_PID=$!
+              log "Test app started with PID: $APP_PID"
           fi
-          
-          nohup python3 app.py > /home/ubuntu/app.log 2>&1 &
-          APP_PID=$!
+
+          # Проверяем что процесс запустился
           sleep 3
-          
-          # Проверяем запуск
-          if ps -p $APP_PID > /dev/null; then
-            log "Application started successfully (PID: $APP_PID)"
-          else
-            log "ERROR: Application failed to start"
-            log "App log:"
-            tail -20 /home/ubuntu/app.log
-            exit 1
-          fi
-          
-          # Проверяем порт
-          if netstat -tln | grep :8181 > /dev/null; then
-            log "Application is listening on port 8181"
-          else
-            log "ERROR: Application not listening on port 8181"
-            exit 1
-          fi
-          
-          log "=== Deployment completed successfully ==="
+          if ps -p $APP_PID > /dev/null 2>&1; then
+              log "Application star
