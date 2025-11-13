@@ -3,31 +3,25 @@ name: CD Deploy
 on:
   release:
     types: [published]
-    
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
-        
-    - name: Install dependencies
+        python-version: '3.12'
+
+    - name: Install dependencies (for lint/tests if needed)
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        
-    - name: Build application 
-      run: |
-        echo "Building application..."
-        # Добавьте команды сборки если нужны
-        
+
     - name: Deploy to VM
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -41,84 +35,66 @@ jobs:
           DEPLOY_DIR="/home/ubuntu/app"
           LOG_FILE="/home/ubuntu/deploy.log"
 
-          # Функция логирования
           log() {
               echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
           }
 
           log "=== Starting deployment ==="
 
-          # 1. Очистка директории БЕЗ sudo
+          # 1. Очистка директории
           log "Cleaning deployment directory..."
-          cd /home/ubuntu
           rm -rf "$DEPLOY_DIR"
           mkdir -p "$DEPLOY_DIR"
-          cd "$DEPLOY_DIR"
-
-          log "Directory contents after clean:"
-          ls -la
+          cd "$DEPLOY_DIR" || exit 1
 
           # 2. Клонирование репозитория
           log "Cloning repository..."
           git clone -b github-actions "$REPO_URL" . >> "$LOG_FILE" 2>&1
           if [ $? -ne 0 ]; then
-              log "ERROR: Git clone failed"
+              log "❌ ERROR: Git clone failed"
               exit 1
           fi
 
-          log "Repository cloned successfully"
-          log "Files in app directory:"
-          find . -type f -name "*.py" -o -name "*.txt" -o -name "*.json" | head -10
+          # 3. Настройка Python окружения
+          log "Setting up Python environment..."
+          python3 -m venv venv
+          source venv/bin/activate
 
-          # 3. Проверяем и устанавливаем системные пакеты БЕЗ sudo
-          log "Checking Python environment..."
-          python3 --version
-          pip3 --version || log "pip3 not available"
-
-          # 4. Установка Python зависимостей
-          if [ -f "requirements.txt" ]; then
-              echo "Setting up virtual environment..."
-              python3 -m venv venv
-              source venv/bin/activate
-
-              echo "Installing dependencies..."
-              pip install --upgrade pip
+          pip install --upgrade pip
+          if [ -f requirements.txt ]; then
               pip install -r requirements.txt
-          else
-              log "No requirements.txt found"
           fi
 
-          # 5. Запуск приложения
-          log "Restarting application..."
-          
-          # Останавливаем старые процессы БЕЗ sudo
-          pkill -f "python.*app.py" || log "No existing app processes"
-          pkill -f "python.*8181" || log "No python processes on 8181"
-          sleep 2
+          # 4. Остановка старого процесса (если есть)
+          log "Stopping existing app..."
+          pkill -f "python.*app.py" 2>/dev/null || true
 
-          # Запускаем приложение
-          if [ -f "app.py" ]; then
-              sudo systemctl restart app
-              log "Application started"
+          # 5. Запуск приложения в новом процессе
+          log "Starting application with setsid..."
+          cd "$DEPLOY_DIR"
+          export PYTHONPATH="$DEPLOY_DIR/venv/lib/python3.12/site-packages:$PYTHONPATH"
+          
+          # используем setsid, чтобы процесс не умер после выхода из SSH
+          nohup setsid ./venv/bin/python app.py >> /home/ubuntu/app.log 2>&1 &
+
+          sleep 5
+          if pgrep -f "python.*app.py" > /dev/null; then
+              log "✅ Application started successfully"
           else
-              log "ERROR: app.py not found"
-              log "Available files:"
-              ls -la
+              log "❌ Application failed to start"
+              tail -20 /home/ubuntu/app.log
               exit 1
           fi
 
           # 6. Проверка порта
-          log "Checking port 8181..."
-          sleep 3
-          if netstat -tln 2>/dev/null | grep :8181 > /dev/null || \
-             ss -tln 2>/dev/null | grep :8181 > /dev/null; then
+          log "Checking if port 8181 is open..."
+          if netstat -tln 2>/dev/null | grep :8181 > /dev/null || ss -tln 2>/dev/null | grep :8181 > /dev/null; then
               log "✅ Application is listening on port 8181"
-              log "✅ Deployment completed successfully"
           else
               log "❌ Application NOT listening on port 8181"
-              log "Process check:"
-              ps aux | grep python
-              log "App log (last 30 lines):"
-              tail -30 /home/ubuntu/app.log
+              ps aux | grep app.py
+              tail -20 /home/ubuntu/app.log
               exit 1
           fi
+
+          log "🎉 Deployment completed successfully"
