@@ -70,14 +70,11 @@ jobs:
           pkill -f "python.*app.py" 2>/dev/null || true
 
           # 5. Запуск приложения в новом процессе
-          log "Starting application with setsid..."
-          cd "$DEPLOY_DIR"
-          export PYTHONPATH="$DEPLOY_DIR/venv/lib/python3.12/site-packages:$PYTHONPATH"
-          
-          # используем setsid, чтобы процесс не умер после выхода из SSH
-          nohup setsid ./venv/bin/python app.py >> /home/ubuntu/app.log 2>&1 &
-
+          log "Restarting application via daemon..."
+          # Останавливаем и запускаем приложение через демон
+          systemctl restart devops_app_lab1
           sleep 5
+
           if pgrep -f "python.*app.py" > /dev/null; then
               log "✅ Application started successfully"
           else
