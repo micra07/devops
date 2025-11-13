@@ -34,6 +34,7 @@ jobs:
           REPO_URL="https://github.com/moter1026/devops.git"
           DEPLOY_DIR="/home/ubuntu/app"
           LOG_FILE="/home/ubuntu/deploy.log"
+          SERVICE_NAME="devops_app_lab1"
 
           log() {
               echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
@@ -57,7 +58,7 @@ jobs:
 
           # 3. Настройка Python окружения
           log "Setting up Python environment..."
-          python3 -m venv .venv
+          python3 -m venv --system-site-packages .venv
           source .venv/bin/activate
 
           pip install --upgrade pip
@@ -65,17 +66,16 @@ jobs:
               pip install -r requirements.txt
           fi
 
-          # 4. Запуск приложения в новом процессе
+          # 4. Перезапуск приложения через демон
           log "Restarting application via daemon..."
-          # Останавливаем и запускаем приложение через демон
-          systemctl restart devops_app_lab1
+          sudo systemctl restart $SERVICE_NAME
           sleep 5
 
-          if pgrep -f "python.*app.py" > /dev/null; then
-              log "✅ Application started successfully"
+          if systemctl is-active --quiet $SERVICE_NAME; then
+              log "✅ Application started successfully via daemon"
           else
-              log "❌ Application failed to start"
-              tail -20 /home/ubuntu/app.log
+              log "❌ Application failed to start via daemon"
+              journalctl -u $SERVICE_NAME -n 20
               exit 1
           fi
 
@@ -85,8 +85,7 @@ jobs:
               log "✅ Application is listening on port 8181"
           else
               log "❌ Application NOT listening on port 8181"
-              ps aux | grep app.py
-              tail -20 /home/ubuntu/app.log
+              journalctl -u $SERVICE_NAME -n 20
               exit 1
           fi
 
