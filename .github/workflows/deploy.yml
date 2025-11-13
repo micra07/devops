@@ -45,40 +45,43 @@ jobs:
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
           }
           
-          log "=== Starting deployment from github-actions branch ==="
+          log "=== Starting deployment ==="
           
           # Создаем директорию если не существует
           mkdir -p $DEPLOY_DIR
           cd $DEPLOY_DIR
           
-          # Клонирование или обновление кода из ветки github-actions
-          if [ ! -d ".git" ]; then
-            log "Cloning repository from github-actions branch..."
-            git clone -b github-actions https://github.com/${{ github.repository }}.git .
-          else
-            log "Updating repository from github-actions branch..."
-            git fetch origin
-            git reset --hard origin/github-actions
+          # Очищаем директорию если она не пустая
+          if [ "$(ls -A $DEPLOY_DIR)" ]; then
+            log "Cleaning existing directory..."
+            rm -rf $DEPLOY_DIR/*
           fi
           
-          # Переключаемся на тег релиза (если он есть в ветке github-actions)
+          # Клонирование репозитория
+          log "Cloning repository from github-actions branch..."
+          git clone -b github-actions https://github.com/${{ github.repository }}.git .
+          
+          # Переключаемся на тег релиза
           log "Checking out release tag: ${{ github.event.release.tag_name }}"
           git checkout ${{ github.event.release.tag_name }}
+          
+          # Установка системных зависимостей
+          log "Installing system dependencies..."
+          sudo apt update
+          sudo apt install -y python3-venv python3-pip
           
           # Установка зависимостей Python
           if [ -f "requirements.txt" ]; then
             log "Installing Python dependencies..."
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv
-            fi
+            python3 -m venv venv
             source venv/bin/activate
             pip install -r requirements.txt
           fi
           
           # Останавливаем старые процессы
           log "Stopping existing application..."
-          pkill -f "python.*app.py" || true
-          pkill -f "python.*8181" || true
+          sudo pkill -f "python.*app.py" || true
+          sudo pkill -f "python.*8181" || true
           sleep 2
           
           # Запускаем приложение
@@ -96,6 +99,8 @@ jobs:
             log "Application started successfully (PID: $APP_PID)"
           else
             log "ERROR: Application failed to start"
+            log "App log:"
+            tail -20 /home/ubuntu/app.log
             exit 1
           fi
           
@@ -107,4 +112,4 @@ jobs:
             exit 1
           fi
           
-          log "=== Deployment from github-actions completed successfully ==="
+          log "=== Deployment completed successfully ==="
