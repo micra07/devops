@@ -25,7 +25,7 @@ It is recommended to install dependencies into a [virtual environment](https://d
 
 
 ## Running the app
-
+  
 To run the app:
 
 ```
