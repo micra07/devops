@@ -1,229 +1,173 @@
 #!/usr/bin/env python3
 """
 Webhook сервер для автоматического развертывания catty-reminders-app
+Использует FastAPI вместо BaseHTTPRequestHandler
 """
-#4try
-import tempfile
+
+from fastapi import FastAPI, Request, Response
 import subprocess
 import os
 import json
-import hashlib
-import hmac
 from datetime import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import sys
 
 # Конфигурация
-PORT = 8080
+WEBHOOK_PORT = 8080
 APP_PORT = 8181
-APP_DIR = "/home/ubuntu/catty-app"  # Папка где будет развернуто приложение
+APP_DIR = "/home/vboxuser/catty-app"
+REPO_URL = "https://github.com/micra07/devops.git"
 
-class WebhookHandler(BaseHTTPRequestHandler):
+app = FastAPI(title="Catty App Webhook Server")
 
-    def do_POST(self):
-        """Обработка POST запросов от GitHub"""
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length)
+@app.post("/")
+async def webhook(request: Request):
+    """Обработка webhook событий от GitHub"""
+    
+    # Получаем данные webhook
+    payload = await request.json()
+    event_type = request.headers.get("X-GitHub-Event", "unknown")
+    
+    # Логируем событие
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    repo_name = payload.get('repository', {}).get('full_name', 'unknown')
+    branch = payload.get('ref', '').replace('refs/heads/', '')
+    commits = payload.get('commits', [])
+    
+    print(f"\n🔔 Получено webhook событие:")
+    print(f"   Время: {timestamp}")
+    print(f"   Тип события: {event_type}")
+    print(f"   Репозиторий: {repo_name}")
+    print(f"   📝 Push в ветку: {branch}")
+    print(f"   📊 Коммитов: {len(commits)}")
+    
+    # Обрабатываем только push события
+    if event_type == "push":
+        await _handle_push_event(branch)
+    
+    return Response(status_code=200)
 
-        try:
-            payload = json.loads(body.decode('utf-8'))
-            self._process_webhook(payload)
+@app.get("/")
+async def health():
+    """Страница статуса"""
+    return {
+        "status": "ok", 
+        "service": "Catty App Webhook Server",
+        "timestamp": datetime.now().isoformat(),
+        "webhook_port": WEBHOOK_PORT,
+        "app_port": APP_PORT,
+        "app_url": f"http://app.{os.environ.get('ID', 'your-id')}.{os.environ.get('PROXY', 'course.prafdin.ru')}"
+    }
 
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(b'{"status": "success"}')
-
-        except json.JSONDecodeError:
-            print("Ошибка парсинга JSON")
-            self.send_response(400)
-            self.end_headers()
-
-    def do_GET(self):
-        """Простая страница статуса"""
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
-        self.end_headers()
-
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Catty App Webhook Server</title>
-            <meta charset="utf-8">
-            <style>
-                body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }}
-                .container {{ background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                h1 {{ color: #4d90cd; text-align: center; }}
-                .info {{ background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0; }}
-                .status {{ padding: 10px; border-radius: 5px; margin: 10px 0; }}
-                .success {{ background-color: #d4edda; color: #155724; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1> Catty App Webhook Server</h1>
-                <div class="info">
-                    <p><strong>Статус:</strong> Сервер активен и ожидает webhook события</p>
-                    <p><strong>Время запуска:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
-                    <p><strong>Webhook порт:</strong> {PORT}</p>
-                    <p><strong>Приложение порт:</strong> {APP_PORT}</p>
-                </div>
-                <div class="status success">
-                    <p><strong>Приложение доступно по адресу:</strong> http://app.{os.environ.get('ID', 'your-id')}.{os.environ.get('PROXY', 'course.prafdin.ru')}</p>
-                </div>
-                <p>Этот сервер автоматически развертывает приложение Catty Reminders при каждом push в репозиторий.</p>
-            </div>
-        </body>
-        </html>
-        """
-        self.wfile.write(html.encode('utf-8'))
-
-    def _process_webhook(self, payload):
-        """Обработка webhook события"""
-        event_type = self.headers.get('X-GitHub-Event', 'unknown')
-        repo_name = payload.get('repository', {}).get('full_name', 'unknown')
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        print(f"\nПолучено webhook событие:")
-        print(f"   Время: {timestamp}")
-        print(f"   Тип события: {event_type}")
-        print(f"   Репозиторий: {repo_name}")
-
-        if event_type == 'push':
-            self._handle_push_event(payload)
-        else:
-            print(f"  Событие '{event_type}' - только логирование")
-
-    def _handle_push_event(self, payload):
-        """Обработка push события - автоматическое развертывание"""
-        branch = payload.get('ref', '').replace('refs/heads/', '')
-        clone_url = payload.get('repository', {}).get('clone_url', '')
-        commits = payload.get('commits', [])
-
-        print(f"   Push в ветку: {branch}")
-        print(f"   Коммитов: {len(commits)}")
-
-        # АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ
-        print(f"   ЗАПУСКАЕМ АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ:")
-
-        try:
-            # 1. Останавливаем текущее приложение
-            print(f"      - Останавливаем текущее приложение...")
-            subprocess.run(["pkill", "-f", "uvicorn"], capture_output=True)
-
-            # 2. Обновляем код
-            print(f"  - Обновляем код из репозитория...")
-            if os.path.exists(APP_DIR):
-                # Если папка уже существует, делаем pull
-                result = subprocess.run(
-                    ["git", "pull", "origin", branch],
-                    cwd=APP_DIR,
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode != 0:
-                    print(f"   Ошибка при pull: {result.stderr}")
-                    return
-                print(f"   Код обновлен (git pull)")
+async def _handle_push_event(branch: str):
+    """Обработка push события - автоматическое развертывание"""
+    print(f"   🚀 ЗАПУСКАЕМ АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ:")
+    
+    try:
+        # 1. Останавливаем приложение
+        print(f"      - Останавливаем приложение...")
+        result = subprocess.run(
+            ["sudo", "systemctl", "stop", "catty-app.service"],
+            capture_output=True,
+            text=True
+        )
+        
+        # 2. Обновляем код
+        print(f"      - Обновляем код из репозитория...")
+        if not os.path.exists(APP_DIR):
+            os.makedirs(APP_DIR, exist_ok=True)
+        
+        os.chdir(APP_DIR)
+        
+        # Проверяем это git репозиторий
+        if os.path.exists(os.path.join(APP_DIR, ".git")):
+            # Делаем pull если это git репозиторий
+            subprocess.run(["git", "fetch"], capture_output=True)
+            subprocess.run(["git", "checkout", branch], capture_output=True)
+            result = subprocess.run(["git", "pull"], capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"      ✅ Код обновлен (git pull)")
             else:
-                # Если папки нет, делаем clone
-                result = subprocess.run(
-                    ["git", "clone", clone_url, APP_DIR],
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode != 0:
-                    print(f"     Ошибка при clone: {result.stderr}")
-                    return
-                print(f"      Репозиторий склонирован")
-
-            # 3. Переходим в нужную ветку
+                print(f"      ❌ Ошибка при pull: {result.stderr}")
+                return
+        else:
+            # Клонируем если это не git репозиторий
             result = subprocess.run(
-                ["git", "checkout", branch],
-                cwd=APP_DIR,
-                capture_output=True,
-                text=True
-            )
-            print(f"     Переключено на ветку: {branch}")
-
-            # 4. Устанавливаем зависимости в виртуальном окружении
-            print(f"      - Устанавливаем зависимости в виртуальном окружении...")
-            
-            # Создаем venv если не существует
-            venv_path = os.path.join(APP_DIR, "venv")
-            if not os.path.exists(venv_path):
-                result = subprocess.run(
-                    ["python3", "-m", "venv", "venv"],
-                    cwd=APP_DIR,
-                    capture_output=True,
-                    text=True
-                )
-                print(f"     Виртуальное окружение создано")
-
-            # Устанавливаем зависимости через venv pip
-            pip_path = os.path.join(APP_DIR, "venv/bin/pip")
-            result = subprocess.run(
-                [pip_path, "install", "-r", "requirements.txt"],
-                cwd=APP_DIR,
+                ["git", "clone", REPO_URL, APP_DIR],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
-                print(f"     Зависимости установлены")
+                print(f"      ✅ Репозиторий склонирован")
+                os.chdir(APP_DIR)
+                subprocess.run(["git", "checkout", branch], capture_output=True)
             else:
-                print(f"    Возможные проблемы с зависимостями: {result.stderr}")
+                print(f"      ❌ Ошибка при clone: {result.stderr}")
+                return
 
-            # 5. Запускаем приложение в фоне через venv
-            print(f"   - Запускаем приложение...")
-            uvicorn_path = os.path.join(APP_DIR, "venv/bin/uvicorn")
-            process = subprocess.Popen(
-                [uvicorn_path, "app.main:app", "--host", "0.0.0.0", "--port", str(APP_PORT)],
-                cwd=APP_DIR,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+        # 3. Устанавливаем зависимости в виртуальном окружении
+        print(f"      - Устанавливаем зависимости...")
+        venv_path = os.path.join(APP_DIR, "venv")
+        if not os.path.exists(venv_path):
+            result = subprocess.run(
+                ["python3", "-m", "venv", "venv"],
+                capture_output=True,
+                text=True
             )
+            print(f"      ✅ Виртуальное окружение создано")
+
+        # Устанавливаем зависимости через venv pip
+        pip_path = os.path.join(APP_DIR, "venv/bin/pip")
+        result = subprocess.run(
+            [pip_path, "install", "-r", "requirements.txt"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            print(f"      ✅ Зависимости установлены")
+        else:
+            print(f"      ⚠️  Проблемы с зависимостями: {result.stderr}")
+
+        # 4. Запускаем приложение через systemd
+        print(f"      - Запускаем приложение через systemd...")
+        result = subprocess.run(
+            ["sudo", "systemctl", "start", "catty-app.service"],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            print(f"      ✅ Systemd сервис запущен")
             
             # Даем время на запуск
             import time
             time.sleep(3)
             
-            # Проверяем что процесс запущен
-            if process.poll() is None:
-                print(f"    Приложение запущено на порту {APP_PORT}")
-                
-                # Сохраняем PID для возможности управления
-                with open("/tmp/catty-app.pid", "w") as f:
-                    f.write(str(process.pid))
+            # Проверяем статус
+            status_result = subprocess.run(
+                ["sudo", "systemctl", "is-active", "catty-app.service"],
+                capture_output=True,
+                text=True
+            )
+            if status_result.stdout.strip() == "active":
+                print(f"      ✅ Приложение активно на порту {APP_PORT}")
+                print(f"      🎉 АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ УСПЕШНО!")
+                print(f"      🌐 Приложение доступно по: http://app.{os.environ.get('ID', 'ushakov')}.{os.environ.get('PROXY', 'course.prafdin.ru')}")
             else:
-                stdout, stderr = process.communicate()
-                print(f"    Ошибка запуска приложения: {stderr.decode()}")
-                return
+                print(f"      ❌ Приложение не запустилось")
+        else:
+            print(f"      ❌ Ошибка запуска: {result.stderr}")
 
-            print(f"    АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ УСПЕШНО ЗАВЕРШЕНО!")
-            print(f"  Приложение доступно по: http://app.{os.environ.get('ID', 'your-id')}.{os.environ.get('PROXY', 'course.prafdin.ru')}")
+    except Exception as e:
+        print(f"      ❌ КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
 
-        except Exception as e:
-            print(f"  КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
-
-def main():
-    """Запуск webhook сервера"""
-    print(f" Запуск Catty App Webhook Server")
-    print(f" Webhook порт: {PORT}")
-    print(f" App порт: {APP_PORT}")
-    print(f" Директория приложения: {APP_DIR}")
-    print(f" Время запуска: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"\n Ожидание webhook событий от GitHub...")
-    print(f" Для остановки: Ctrl+C\n")
-
-    # Создаем директорию для приложения если её нет
-    os.makedirs(APP_DIR, exist_ok=True)
-
-    try:
-        server = HTTPServer(('0.0.0.0', PORT), WebhookHandler)
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print(f"\n Сервер остановлен")
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    import uvicorn
+    
+    print(f"🚀 Запуск Catty App Webhook Server")
+    print(f"📡 Webhook порт: {WEBHOOK_PORT}")
+    print(f"🌐 App порт: {APP_PORT}")
+    print(f"📁 Директория приложения: {APP_DIR}")
+    print(f"⏰ Время запуска: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"\n👀 Ожидание webhook событий от GitHub...")
+    print(f"💡 Для остановки: Ctrl+C\n")
+    
+    uvicorn.run(app, host="0.0.0.0", port=WEBHOOK_PORT)
