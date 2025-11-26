@@ -2,7 +2,7 @@
 """
 Webhook сервер для автоматического развертывания catty-reminders-app
 """
-#1 try
+#2 try
 import tempfile
 import subprocess
 import os
