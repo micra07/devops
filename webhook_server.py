@@ -3,7 +3,7 @@
 Webhook сервер для автоматического развертывания catty-reminders-app
 Использует FastAPI вместо BaseHTTPRequestHandler
 """
-# morning test7
+# morning test8
 from fastapi import FastAPI, Request, Response
 import subprocess
 import os
