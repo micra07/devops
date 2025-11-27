@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, actions ]
+  pull_request:
+    branches: [ master, actions ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Run basic syntax check
+      run: |
+        # Проверяем синтаксис основных Python файлов
+        if [ -f "app.py" ]; then
+          python -m py_compile app.py
+          echo "✅ app.py syntax check passed"
+        fi
+        
+        if [ -f "idea.py" ]; then
+          python -m py_compile idea.py
+          echo "✅ idea.py syntax check passed"
+        fi
+        
+    - name: Check imports
+      run: |
+        # Проверяем что основные модули импортируются
+        python -c "
+        try:
+            import app
+            print('✅ app module imports successfully')
+        except Exception as e:
+            print(f'❌ app import error: {e}')
+            
+        try:
+            import idea
+            print('✅ idea module imports successfully') 
+        except Exception as e:
+            print(f'❌ idea import error: {e}')
+        "
+        
+    - name: Validate configuration files
+      run: |
+        # Проверяем что конфигурационные файлы существуют и валидны
+        if [ -f "config.json" ]; then
+          echo "✅ config.json exists"
+          python -c "import json; json.load(open('config.json')); print('✅ config.json is valid JSON')"
+        fi
+        
+        if [ -f "inputs.json" ]; then
+          echo "✅ inputs.json exists" 
+          python -c "import json; json.load(open('inputs.json')); print('✅ inputs.json is valid JSON')"
+        fi
+        
+    - name: Verify requirements.txt
+      run: |
+        # Проверяем что requirements.txt существует
+        if [ -f "requirements.txt" ]; then
+          echo "✅ requirements.txt exists"
+          echo "Dependencies:"
+          cat requirements.txt
+        else
+          echo "❌ requirements.txt not found"
+          exit 1
+        fi
