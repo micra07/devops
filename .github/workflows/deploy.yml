@@ -30,91 +30,122 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 2434
         script: |
-          # Конфигурация (из webhook сервера)
+          # Конфигурация
           APP_DIR="/home/vboxuser/catty-app"
           REPO_URL="https://github.com/micra07/devops.git"
           BRANCH="actions"
           SERVICE_NAME="catty-app.service"
           LOG_FILE="/home/vboxuser/deploy.log"
 
-          # Функция логирования как в webhook
+          # Функция логирования
           log() {
               echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
           }
 
           log "🚀 ЗАПУСКАЕМ АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ (CD):"
 
-          try {
-            # 1. Останавливаем приложение (как в webhook)
-            log "   - Останавливаем приложение..."
-            sudo systemctl stop $SERVICE_NAME || true
+          # 1. Останавливаем приложение
+          log "   - Останавливаем приложение..."
+          sudo systemctl stop "$SERVICE_NAME" || true
 
-            # 2. Обновляем код (точная логика из webhook)
-            log "   - Обновляем код из репозитория..."
-            if [ ! -d "$APP_DIR" ]; then
-                mkdir -p "$APP_DIR"
-            fi
+          # 2. Обновляем код
+          log "   - Обновляем код из репозитория..."
+          if [ ! -d "$APP_DIR" ]; then
+              mkdir -p "$APP_DIR"
+          fi
 
-            cd "$APP_DIR"
+          cd "$APP_DIR"
 
-            # Проверяем это git репозиторий (как в webhook)
-            if [ -d ".git" ]; then
-                # Делаем pull если это git репозиторий
-                git fetch
-                git checkout $BRANCH
-                if git pull; then
-                    log "   ✅ Код обновлен (git pull)"
-                else
-                    log "   ❌ Ошибка при pull"
-                    exit 1
-                fi
-            else
-                # Клонируем если это не git репозиторий
-                if git clone $REPO_URL .; then
-                    log "   ✅ Репозиторий склонирован"
-                    git checkout $BRANCH
-                else
-                    log "   ❌ Ошибка при clone"
-                    exit 1
-                fi
-            fi
+          # Проверяем это git репозиторий
+          if [ -d ".git" ]; then
+              # Делаем pull если это git репозиторий
+              git fetch
+              git checkout "$BRANCH"
+              if git pull; then
+                  log "   ✅ Код обновлен (git pull)"
+              else
+                  log "   ❌ Ошибка при pull"
+                  exit 1
+              fi
+          else
+              # Клонируем если это не git репозиторий
+              if git clone "$REPO_URL" .; then
+                  log "   ✅ Репозиторий склонирован"
+                  git checkout "$BRANCH"
+              else
+                  log "   ❌ Ошибка при clone"
+                  exit 1
+              fi
+          fi
 
-            # 3. Устанавливаем зависимости в виртуальном окружении (как в webhook)
-            log "   - Устанавливаем зависимости..."
-            VENV_PATH="$APP_DIR/venv"
-            
-            if [ ! -d "$VENV_PATH" ]; then
-                python3 -m venv "$VENV_PATH"
-                log "   ✅ Виртуальное окружение создано"
-            fi
+          # 3. Устанавливаем зависимости в виртуальном окружении
+          log "   - Устанавливаем зависимости..."
+          VENV_PATH="$APP_DIR/venv"
+          
+          if [ ! -d "$VENV_PATH" ]; then
+              python3 -m venv "$VENV_PATH"
+              log "   ✅ Виртуальное окружение создано"
+          fi
 
-            # Устанавливаем зависимости через venv pip
-            source "$VENV_PATH/bin/activate"
-            if "$VENV_PATH/bin/pip" install -r requirements.txt; then
-                log "   ✅ Зависимости установлены"
-            else
-                log "   ⚠️  Проблемы с зависимостями"
-            fi
+          # Устанавливаем зависимости через venv pip
+          source "$VENV_PATH/bin/activate"
+          if "$VENV_PATH/bin/pip" install -r requirements.txt; then
+              log "   ✅ Зависимости установлены"
+          else
+              log "   ⚠️  Проблемы с зависимостями"
+              exit 1
+          fi
 
-            # 4. Запускаем приложение через systemd (как в webhook)
-            log "   - Запускаем приложение через systemd..."
-            sudo systemctl daemon-reload
-            if sudo systemctl start $SERVICE_NAME; then
-                log "   ✅ Systemd сервис запущен"
-                
-                # Даем время на запуск (как в webhook)
-                sleep 3
-                
-                # Проверяем статус (как в webhook)
-                if sudo systemctl is-active $SERVICE_NAME; then
-                    log "   ✅ Приложение активно на порту 8181"
-                    
-                    # Проверяем доступность приложения
-                    if curl -f http://localhost:8181/ > /dev/null 2>&1; then
-                        log "   ✅ Приложение отвечает на HTTP запросы"
-                        log "   🎉 АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ УСПЕШНО!"
-                        log "   🌐 Приложение доступно по: http://app.ushakov.course.prafdin.ru"
-                    else
-                        log "   ❌ Приложение не отвечает на HTTP"
-                        sudo journalctl -u $SERVICE_NAME -n 20 --no-pager
-                        exit 1
+          # 4. Создаем systemd service если его нет
+          log "   - Настраиваем systemd сервис..."
+          sudo tee /etc/systemd/system/"$SERVICE_NAME" > /dev/null <<EOF
+          [Unit]
+          Description=Catty App Service
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=vboxuser
+          WorkingDirectory=$APP_DIR
+          Environment=PATH=$VENV_PATH/bin
+          ExecStart=$VENV_PATH/bin/python webhook_server.py
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          # 5. Запускаем приложение через systemd
+          log "   - Запускаем приложение через systemd..."
+          sudo systemctl daemon-reload
+          if sudo systemctl start "$SERVICE_NAME"; then
+              log "   ✅ Systemd сервис запущен"
+              
+              # Даем время на запуск
+              sleep 5
+              
+              # Проверяем статус
+              if sudo systemctl is-active "$SERVICE_NAME" > /dev/null; then
+                  log "   ✅ Приложение активно на порту 8181"
+                  
+                  # Проверяем доступность приложения
+                  if curl -f http://localhost:8181/ > /dev/null 2>&1; then
+                      log "   ✅ Приложение отвечает на HTTP запросы"
+                      log "🎉 АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ УСПЕШНО!"
+                      log "   🌐 Приложение доступно по: http://app.ushakov.course.prafdin.ru"
+                  else
+                      log "   ❌ Приложение не отвечает на HTTP"
+                      sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager
+                      exit 1
+                  fi
+              else
+                  log "   ❌ Приложение не запустилось"
+                  sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager
+                  exit 1
+              fi
+          else
+              log "   ❌ Ошибка запуска systemd сервиса"
+              exit 1
+          fi
+                      
