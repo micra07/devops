@@ -51,16 +51,14 @@ jobs:
             print(f'✗ UI tests import failed: {e}')
         "
 
-  # Job для сборки и публикации Docker образа
   docker-build:
-    needs: test  # Зависит только от тестов
+    needs: test
     runs-on: ubuntu-latest
-    # Собираем только при push в ветки (не при pull request)
     if: github.event_name == 'push' && (github.ref == 'refs/heads/Docker' || github.ref == 'refs/heads/actions' || github.ref == 'refs/heads/master')
     
     permissions:
       contents: read
-      packages: write  # Нужно для записи в GitHub Container Registry
+      packages: write
     
     steps:
     - name: Checkout code
@@ -70,8 +68,8 @@ jobs:
       uses: docker/login-action@v3
       with:
         registry: ghcr.io
-        username: ${{ github.actor }}  # Ваш GitHub username (micra07)
-        password: ${{ secrets.GHCR_TOKEN }}  # Секрет, который добавили
+        username: ${{ github.actor }}
+        password: ${{ secrets.GHCR_TOKEN }}
     
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
