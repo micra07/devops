@@ -56,7 +56,7 @@ jobs:
     needs: test  # Зависит только от тестов
     runs-on: ubuntu-latest
     # Собираем только при push в ветки (не при pull request)
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/Docker'  github.ref == 'refs/heads/actions'  github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/Docker' || github.ref == 'refs/heads/actions' || github.ref == 'refs/heads/master')
     
     permissions:
       contents: read
