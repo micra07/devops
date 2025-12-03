@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master, actions ]
+    branches: [ master, Docker ]
   pull_request:
-    branches: [ master, actions ]
+    branches: [ master, Docker ]
 
 jobs:
   test:
@@ -50,3 +50,57 @@ jobs:
         except Exception as e:
             print(f'✗ UI tests import failed: {e}')
         "
+
+  # НОВЫЙ JOB: Линтинг Dockerfile (опционально из задания 4)
+  lint-dockerfile:
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Не завершать пайплайн при ошибках линтера
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run hadolint
+      uses: hadolint/hadolint-action@v3.1.0
+      with:
+        dockerfile: Dockerfile
+        failure-threshold: warning
+
+  # НОВЫЙ JOB: Сборка и публикация Docker образа
+  docker-build:
+    needs: [test, lint-dockerfile]  # Зависит от тестов и линтера
+    runs-on: ubuntu-latest
+    # Собираем только при push в ветки (не при pull request)
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/actions' || github.ref == 'refs/heads/master')
+    
+    permissions:
+      contents: read
+      packages: write  # Нужно для записи в GitHub Container Registry
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}  # Ваш GitHub username (micra07)
+        password: ${{ secrets.GHCR_TOKEN }}  # Секрет, который добавили
+    
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository_owner }}/catty-app
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
