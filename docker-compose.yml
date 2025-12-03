@@ -1,0 +1,43 @@
+name: catty-app
+
+services:
+  app:
+    image: ghcr.io/micra07/catty-app:latest
+    ports:
+      - "8181:8181"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://catty_user:catty_password@db:5432/catty_db
+      APP_ENV: production
+      PYTHONUNBUFFERED: 1
+    restart: unless-stopped
+    networks:
+      - catty-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: catty-postgres
+    environment:
+      POSTGRES_DB: catty_db
+      POSTGRES_USER: catty_user
+      POSTGRES_PASSWORD: catty_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catty_user -d catty_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - catty-network
+
+networks:
+  catty-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
