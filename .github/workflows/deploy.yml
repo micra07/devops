@@ -1,4 +1,4 @@
-name: CD Deploy with Docker
+name: CD Deploy with Docker Compose
 
 on:
   release:
@@ -9,16 +9,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GHCR_TOKEN }}
-
     - name: Deploy to VM via SSH
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -27,80 +17,32 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 2434
         script: |
-          # Конфигурация Docker деплоя
-          CONTAINER_NAME="catty-app-container"
-          IMAGE_NAME="ghcr.io/micra07/catty-app:latest"
-          LOG_FILE="/home/vboxuser/deploy-docker.log"
+          set -e  # Выход при ошибке любой команды
           
-          # Функция логирования
-          log() {
-              echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a $LOG_FILE
-          }
+          # Переходим в директорию приложения
+          cd /home/vboxuser/app
           
-          log "🚀 ЗАПУСКАЕМ АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ ЧЕРЕЗ DOCKER (CD):"
+          # Логинимся в GHCR
+          echo "${{ secrets.GHCR_TOKEN }}" | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # 1. Pull latest Docker image из registry
-          log "   - Загружаем последний Docker образ..."
-          if sudo docker pull $IMAGE_NAME; then
-              log "   ✅ Docker образ загружен"
+          # Скачиваем docker-compose.yml из репозитория
+          sudo curl -sL https://raw.githubusercontent.com/micra07/devops/Compose/docker-compose.yml -o docker-compose.yml
+          
+          # Останавливаем старый стек и запускаем новый через Docker Compose
+          sudo docker compose down
+          sudo docker compose pull
+          sudo docker compose up -d
+          
+          # Проверяем работу
+          sleep 10
+          sudo docker compose ps
+          
+          # Проверяем доступность приложения
+          if curl -f http://localhost:8181/; then
+            echo "✅ Приложение успешно развернуто через Docker Compose"
+            echo "🌐 Доступно по: http://app.ushakov.course.prafdin.ru"
           else
-              log "   ❌ Ошибка при загрузке Docker образа"
-              exit 1
+            echo "❌ Ошибка: приложение недоступно"
+            sudo docker compose logs
+            exit 1
           fi
-          
-          # 2. Останавливаем и удаляем старый контейнер
-          log "   - Останавливаем старый контейнер..."
-          sudo docker stop $CONTAINER_NAME 2>/dev/null || true
-          sudo docker rm $CONTAINER_NAME 2>/dev/null || true
-          
-          # 3. Запускаем новый контейнер
-          log "   - Запускаем новый Docker контейнер..."
-          if sudo docker run -d \
-            --name $CONTAINER_NAME \
-            --restart always \
-            -p 8181:8181 \
-            $IMAGE_NAME; then
-              log "   ✅ Docker контейнер запущен"
-          else
-              log "   ❌ Ошибка при запуске Docker контейнера"
-              exit 1
-          fi
-          
-          # 4. Даем время на запуск
-          sleep 5
-          
-          # 5. Проверяем статус контейнера
-          log "   - Проверяем статус контейнера..."
-          if sudo docker ps | grep -q $CONTAINER_NAME; then
-              log "   ✅ Контейнер $CONTAINER_NAME активен"
-          else
-              log "   ❌ Контейнер не запустился"
-              sudo docker logs $CONTAINER_NAME
-              exit 1
-          fi
-          
-          # 6. Проверяем порт
-          log "   - Проверяем порт 8181..."
-          if sudo docker port $CONTAINER_NAME | grep -q "8181"; then
-              log "   ✅ Порт 8181 проброшен"
-          else
-              log "   ❌ Порт 8181 не проброшен"
-              exit 1
-          fi
-          
-          # 7. Проверяем доступность приложения
-          log "   - Проверяем доступность приложения..."
-          if curl -f http://localhost:8181/ > /dev/null 2>&1; then
-              log "   ✅ Приложение отвечает на HTTP запросы"
-              log "   🎉 АВТОМАТИЧЕСКОЕ РАЗВЕРТЫВАНИЕ ЧЕРЕЗ DOCKER УСПЕШНО!"
-              log "   🌐 Приложение доступно по: http://app.ushakov.course.prafdin.ru"
-          else
-              log "   ❌ Приложение не отвечает на HTTP"
-              sudo docker logs $CONTAINER_NAME
-              exit 1
-          fi
-          
-          # 8. Очистка старых образов (опционально)
-          log "   - Очищаем старые Docker образы..."
-          sudo docker image prune -f 2>/dev/null || true
-          log "   ✅ Очистка завершена"
