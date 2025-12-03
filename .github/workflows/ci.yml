@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master, actions, Docker ]
+    branches: [ master, Docker ]
   pull_request:
-    branches: [ master, actions, Docker ]
+    branches: [ master, Docker ]
 
 jobs:
   test:
@@ -54,7 +54,7 @@ jobs:
   docker-build:
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/Docker' || github.ref == 'refs/heads/actions' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/Docker' || github.ref == 'refs/heads/master')
     
     permissions:
       contents: read
