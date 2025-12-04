@@ -17,29 +17,30 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 2434
         script: |
-          set -e
+          set -e  # Выход при ошибке любой команды
+          
+          # Переходим в директорию приложения
           cd /home/vboxuser/app
           
-          # Логин в GHCR
+          # Логинимся в GHCR
           echo "${{ secrets.GHCR_TOKEN }}" | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # Получаем docker-compose.yml
+          # Скачиваем docker-compose.yml из репозитория
           sudo curl -sL https://raw.githubusercontent.com/micra07/devops/Compose/docker-compose.yml -o docker-compose.yml
           
-          # Принудительно удаляем старый образ чтобы избежать кеширования
-          sudo docker image rm ghcr.io/micra07/catty-app:latest 2>/dev/null || true
-          
-          # Останавливаем и запускаем через Docker Compose
+          # Останавливаем старый стек и запускаем новый через Docker Compose
           sudo docker compose down
           sudo docker compose pull
           sudo docker compose up -d
           
-          # Проверяем
-          sleep 15
+          # Проверяем работу
+          sleep 10
           sudo docker compose ps
           
+          # Проверяем доступность приложения
           if curl -f http://localhost:8181/; then
             echo "✅ Приложение успешно развернуто через Docker Compose"
+            echo "🌐 Доступно по: http://app.ushakov.course.prafdin.ru"
           else
             echo "❌ Ошибка: приложение недоступно"
             sudo docker compose logs
